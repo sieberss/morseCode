@@ -145,7 +145,7 @@ public class MorseCodeDecoderTest {
     @Test
     public void testLength111111100111111(){
         Map<Integer,Long> counts = Map.of(6,1L,    7, 1L,  2,1L);
-        MorseCodeDecoder.setStaticValues(counts, 2, 7, 2);
+        MorseCodeDecoder.setStaticValues(counts, 6, 7, 2);
         assertEquals(2,  MorseCodeDecoder.getMaxDotLength(6, 2, 7, 2));
         assertEquals(6,  MorseCodeDecoder.getMaxDashLength(2, 2, 7,2));
     }

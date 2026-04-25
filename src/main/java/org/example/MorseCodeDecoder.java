@@ -9,9 +9,9 @@ public class MorseCodeDecoder {
     private static double minDuration, maxDuration;
     private static Map<Integer, Long> lengthCounts;
 
-    static void setStaticValues(Map<Integer, Long> map, int shortestSegment, int longestOneSegment, int longestZeroSegment){
+    static void setStaticValues(Map<Integer, Long> map, int shortestOneSegment, int longestOneSegment, int longestZeroSegment){
         lengthCounts = map;
-        firstDurationCalculation(shortestSegment, longestOneSegment, longestZeroSegment);
+        firstDurationCalculation(shortestOneSegment, longestOneSegment, longestZeroSegment);
     }
 
     /**
@@ -52,10 +52,11 @@ public class MorseCodeDecoder {
         List<String> segments = getSegments(bits.substring(begin, end + 1));
         if (segments.size() == 1)
             return ".";
-        return decodeSegments(segments);
+        int[] dotAndDashLengths = getDotAndDashLengths(segments);
+        return segmentsToMorse(segments, dotAndDashLengths);
     }
 
-    private static String decodeSegments(List<String> segments) {
+    private static int[] getDotAndDashLengths(List<String> segments) {
         int shortestOneSegment = segments.stream()
                 .filter(s -> s.startsWith("1")).mapToInt(String::length).min().orElseThrow();
         int longestOneSegment = segments.stream()
@@ -81,22 +82,25 @@ public class MorseCodeDecoder {
         int maxDashLength = getMaxDashLength(shortestSegment, maxDotLength, longestOneSegment, longestZeroSegment);
         //long maxDotLength = Math.round(maxDuration);
         //long maxDashLength = Math.round(3 * maxDuration);
+       return new int[]{maxDotLength, maxDashLength};
+    }
+
+    private static String segmentsToMorse(List<String> segments, int[] dotAndDashLengths) {
         StringBuilder sb = new StringBuilder();
-        segments.forEach(segment -> sb.append(getMorseDigit(segment, maxDotLength, maxDashLength)));
+        segments.forEach(segment -> sb.append(getMorseDigit(segment, dotAndDashLengths)));
         return sb.toString();
     }
 
-    private static void firstDurationCalculation(int shortestSegment, int longestOneSegment, int longestZeroSegment) {
+    private static void firstDurationCalculation(int shortestOneSegment, int longestOneSegment, int longestZeroSegment) {
         /* calculate operator's range of bits needed for a dot:
           minimum: shortest segment can be a result of rounding up
           maximum: 3*duration (dash) can round down to longest 1-segment, 7*duration (word separator) to longest 0-segment
          */
+        int shortestSegment = maximumLengthBelow(shortestOneSegment);
         minDuration = shortestSegment - 0.5;
-        int longestDashCandidate = longestOneSegment;
-        if (longestZeroSegment < longestDashCandidate * 7 / 3)
-            longestDashCandidate = Math.max(longestZeroSegment, longestDashCandidate);
+        int longestDashCandidate = Math.max(longestOneSegment + 1, (3 * shortestSegment));
         maxDuration = Math.max(minDuration,
-                Math.max(getMaxDurationForDashLength(longestDashCandidate + 2), getMaxDurationForWordSeparatorLength(longestZeroSegment + 6)));
+                Math.max(getMaxDurationForDashLength(longestDashCandidate), getMaxDurationForWordSeparatorLength(longestZeroSegment)));
     }
 
     private static double getMaxDurationForWordSeparatorLength(long wsLength) {
@@ -115,9 +119,10 @@ public class MorseCodeDecoder {
 
     private static void updateDurationsToMaxDotLength(int maxDotLength, int longestSegment) {
         maxDuration = Math.min(maxDuration, maxDotLength + 0.5);
-        int maxDashLength = (int) Math.min(Math.round(3 * maxDuration), longestSegment);
-        int nextLength = minimumLengthAbove(maxDashLength);
-        minDuration = Math.max(minDuration, getMinDurationForWordSeparatorLength(nextLength));
+        /*int maxDashLength = (int) Math.min(Math.round(3 * maxDuration), longestSegment);
+        int nextLength = minimumLengthAbove(maxDashLength);*/
+        int nextLength = minimumLengthAbove(maxDotLength);
+        minDuration = Math.max(minDuration, getMinDurationForDashLength(nextLength));
     }
 
     private static void updateDurationsToMaxDashLength(int maxDashLength) {
@@ -140,10 +145,10 @@ public class MorseCodeDecoder {
                 .orElse(limit);
     }
 
-    private static String getMorseDigit(String segment, long maxDotLength, long maxDashLength) {
-        if (segment.length() > maxDashLength)
+    private static String getMorseDigit(String segment, int[] dotAndDashLengths) {
+        if (segment.length() > dotAndDashLengths[1])
             return "   ";
-        if (segment.length() <= maxDotLength)
+        if (segment.length() <= dotAndDashLengths[0])
             return segment.startsWith("1")
                     ? "."
                     : "";
@@ -154,11 +159,11 @@ public class MorseCodeDecoder {
 
     static int getMaxDashLength(int minDotLength, int maxDotLength, int longestOneSegment, int longestZeroSegment) {
         int sevenMinimum = (int) Math.round(7 * minDuration);
-        int threeMaximum = (int) Math.round(3 * maxDuration);
+        int threeMaximum = Math.min( (int) Math.round(3 * maxDuration), 3 * maxDotLength);
         int left = minimumLengthAbove(sevenMinimum - 1);
         int right = maximumLengthBelow(threeMaximum + 1);
         int possibleNext = Math.min(left, right);
-        return Math.max(possibleNext, longestOneSegment);
+        return Math.min(possibleNext, 3 * maxDotLength);
         /*int oneBitMore = longestOneSegment + 1;
         int minLongPause = 7 * minDotLength + 6;
         // no dashes
