@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 public class MorseCodeDecoder {
     private static double minDuration, maxDuration;
     private static Map<Integer, Long> lengthCounts;
+    private static List<String> segments;
 
     static void setStaticValues(Map<Integer, Long> map, int shortestOneSegment, int longestOneSegment, int longestZeroSegment){
         lengthCounts = map;
@@ -44,19 +45,16 @@ public class MorseCodeDecoder {
      *
      */
     public static String decodeBitsAdvanced(String bits) {
-        System.out.println("Bits: " + bits);
-        int begin = bits.indexOf('1'),
-                end = bits.lastIndexOf('1');
-        if (begin == -1)
-            return "";
-        List<String> segments = getSegments(bits.substring(begin, end + 1));
+        segments = getSegments(bits);
+        segments.forEach(System.out::println);
         if (segments.size() == 1)
             return ".";
-        int[] dotAndDashLengths = getDotAndDashLengths(segments);
-        return segmentsToMorse(segments, dotAndDashLengths);
+        int[] dotAndDashLengths = getDotAndDashLengths();
+        System.out.printf("longest dot: %d, longest dash: %d", dotAndDashLengths[0], dotAndDashLengths[1]);
+        return segmentsToMorse(dotAndDashLengths, segments);
     }
 
-    private static int[] getDotAndDashLengths(List<String> segments) {
+    private static int[] getDotAndDashLengths() {
         int shortestOneSegment = segments.stream()
                 .filter(s -> s.startsWith("1")).mapToInt(String::length).min().orElseThrow();
         int longestOneSegment = segments.stream()
@@ -69,23 +67,42 @@ public class MorseCodeDecoder {
                 .map(String::length)
                 .collect(Collectors.groupingBy(Integer::intValue, Collectors.counting()));
         System.out.println(lengthCounts);
+        System.out.println("longest 1-segment: " + longestOneSegment);
         int shortestSegment = Math.min(shortestOneSegment, shortestZeroSegment);
         int longestSegment = Math.max(longestOneSegment, longestZeroSegment);
-        firstDurationCalculation(shortestSegment, longestOneSegment, longestZeroSegment);
-        System.out.printf("longest 1-segment: %d, duration %f to %f\n",  longestOneSegment, minDuration, maxDuration);
-        /*updateDurationsToMaxDotLength( (int) Math.round(maxDuration));
-        System.out.printf("revised duration: %f to %f\n", minDuration, maxDuration);*/
 
-        int maxDotLength = getMaxDotLength(shortestOneSegment, shortestZeroSegment, longestOneSegment, longestZeroSegment);
-        updateDurationsToMaxDotLength(maxDotLength, longestSegment);
-        System.out.printf("max. dot length: % d, new duration: %f to %f\n", maxDotLength, minDuration, maxDuration);
-        int maxDashLength = getMaxDashLength(shortestSegment, maxDotLength, longestOneSegment, longestZeroSegment);
-        //long maxDotLength = Math.round(maxDuration);
-        //long maxDashLength = Math.round(3 * maxDuration);
-       return new int[]{maxDotLength, maxDashLength};
+        if (longestSegment < 2 * shortestSegment)
+            // only dots and short pauses
+            return new int[]{longestSegment, longestSegment + 1};
+        if (maximumLengthBelow(longestZeroSegment) < 6 * shortestSegment) {
+            // no word breaks, so treat longest 0-segment like 1-segment
+            return new int[]{maximumLengthBelow(1 + (longestSegment) / 3), longestSegment};
+        }
+        if (longestOneSegment < 2 * shortestSegment) {
+            // no dashes, but long pauses
+            return new int[]{maximumLengthBelow(2 + (longestZeroSegment) / 7), longestZeroSegment};
+        }
+
+        maxDuration = Math.max(getMinDurationForDashLength(longestOneSegment),
+                getMinDurationForWordSeparatorLength(longestZeroSegment));
+        int dotMax = (int) Math.ceil(maxDuration);
+        int dashMax = (int) Math.ceil(3 * maxDuration);
+        return checkLengths(dotMax, dashMax, shortestSegment);
     }
 
-    private static String segmentsToMorse(List<String> segments, int[] dotAndDashLengths) {
+    private static int[] checkLengths(int dotMax, int dashMax, int shortestSegment) {
+        int firstDash = minimumLengthAbove(dotMax);
+        if ((getMinDurationForDashLength(firstDash) <= shortestSegment + 0.5)
+                && (dotMax >= getMaxDurationForDashLength(dashMax))) {
+            // try with firstDash as dotMax, according dashMax is calculated as follows:
+            // maxDuration > dotMax - 0.5 => 3 * maxDuration > 3 * dotMax - 1.5
+            return checkLengths(firstDash, firstDash * 3 - 1, shortestSegment);
+        }
+        // else maximal lengths found
+        return new int[]{dotMax, dashMax};
+    }
+
+    static String segmentsToMorse(int[] dotAndDashLengths, List<String> segments) {
         StringBuilder sb = new StringBuilder();
         segments.forEach(segment -> sb.append(getMorseDigit(segment, dotAndDashLengths)));
         return sb.toString();
@@ -157,49 +174,6 @@ public class MorseCodeDecoder {
                 : " ";
     }
 
-    static int getMaxDashLength(int minDotLength, int maxDotLength, int longestOneSegment, int longestZeroSegment) {
-        int sevenMinimum = (int) Math.round(7 * minDuration);
-        int threeMaximum = Math.min( (int) Math.round(3 * maxDuration), 3 * maxDotLength);
-        int left = minimumLengthAbove(sevenMinimum - 1);
-        int right = maximumLengthBelow(threeMaximum + 1);
-        int possibleNext = Math.min(left, right);
-        return Math.min(possibleNext, 3 * maxDotLength);
-        /*int oneBitMore = longestOneSegment + 1;
-        int minLongPause = 7 * minDotLength + 6;
-        // no dashes
-        if (longestOneSegment <= maxDotLength) {
-            return maximumLengthBelow(3 * maxDotLength + 3, lengthCounts);
-
-        }
-        if (longestZeroSegment <= minLongPause) {
-            return maximumLengthBelow(longestZeroSegment, lengthCounts);
-        }
-        if ((oneBitMore <= maxDotLength * 3) && (longestZeroSegment >= oneBitMore) && (lengthCounts.get(oneBitMore) != null))
-                return oneBitMore;
-        return longestOneSegment;*/
-    }
-
-     static int getMaxDotLength(int shortestOneSegment, int shortestZeroSegment, int longestOneSegment, int longestZeroSegment) {
-        //int min = Math.min(shortestOneSegment, shortestZeroSegment);
-        int threeMinimum = (int) Math.round(3 * minDuration);
-        int oneMaximum = (int) Math.round(maxDuration);
-        int limit = Math.max(threeMinimum, oneMaximum + 1);
-        return maximumLengthBelow(limit);/*
-        int sevenMinimum = 7 * min;
-        // no dots or no dashes
-        if (shortestOneSegment >= threeMinimum || longestOneSegment < threeMinimum)
-            // return longest segment shorter than tripleMin
-            return maximumLengthBelow(threeMinimum, lengthCounts);
-        int length = maxCountDot;
-        long count = lengthCounts.get(length);
-        long nextCount = lengthCounts.getOrDefault(maxCountDot + 1, 0L);
-        while ((nextCount <= count) && (nextCount > 0) && (length < min+3) && (length <= longestOneSegment)) {
-            length++;
-            count = nextCount;
-            nextCount = lengthCounts.getOrDefault(length + 1, 0L);
-        }
-        return length;*/
-    }
 
     private static Integer maxCountLengthBelow(int limit) {
         return lengthCounts.entrySet().stream()
@@ -209,20 +183,34 @@ public class MorseCodeDecoder {
                 .getKey();
     }
 
-    private static List<String> getSegments(String bits) {
+    static List<String> getSegments(String bits) {
         List<String> segments = new ArrayList<>();
-        char bit = '1';
-        int oneSegmentStart = 0;
-        int zeroSegmentStart = bits.indexOf('0');
-        while (zeroSegmentStart != -1) {
+        System.out.println("Bits: " + bits);
+        // begin of code
+        int oneSegmentStart = bits.indexOf('1');
+        if (oneSegmentStart == -1) {
+            return segments;
+        }
+        // begin of first pause in code
+        int zeroSegmentStart = bits.indexOf('0', oneSegmentStart);
+        while (true) {
+            if (zeroSegmentStart == - 1){
+                // no following 0s
+                segments.add(bits.substring(oneSegmentStart));
+                break;
+            }
             segments.add(bits.substring(oneSegmentStart, zeroSegmentStart));
-            // following segment of 0s
+            // begin of next 1-segment
             oneSegmentStart = bits.indexOf('1', zeroSegmentStart);
+            if (oneSegmentStart == -1) {
+                // no more 1-segments
+                break;
+            }
+            // add segment of 0s
             segments.add(bits.substring(zeroSegmentStart, oneSegmentStart));
+            // begin of next 0-segment
             zeroSegmentStart = bits.indexOf('0', oneSegmentStart);
         }
-        // add last segment of 1s
-        segments.add(bits.substring(oneSegmentStart));
         return segments;
     }
 }
