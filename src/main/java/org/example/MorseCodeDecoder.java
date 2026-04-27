@@ -58,6 +58,8 @@ public class MorseCodeDecoder {
     public static String decodeBitsAdvanced(String bits) {
         segments = getSegments(bits);
         segments.forEach(System.out::println);
+        if (segments.isEmpty())
+            return "";
         if (segments.size() == 1)
             return ".";
         int[] dotAndDashLengths = getDotAndDashLengths(segments);
