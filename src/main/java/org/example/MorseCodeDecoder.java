@@ -1,6 +1,7 @@
 package org.example;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -8,7 +9,17 @@ import java.util.stream.Collectors;
 public class MorseCodeDecoder {
     private static double minDuration, maxDuration;
     private static Map<Integer, Long> lengthCounts;
+    private static Map<Integer, Weight> lengthWeights;
     private static List<String> segments;
+
+    private static class Weight {
+        long count;
+        long countTimesValue;
+        Weight(long count, long countTimesValue) {
+            this.count = count;
+            this.countTimesValue = countTimesValue;
+        }
+    }
 
     static void setStaticValues(Map<Integer, Long> map, int shortestOneSegment, int longestOneSegment, int longestZeroSegment){
         lengthCounts = map;
@@ -49,12 +60,12 @@ public class MorseCodeDecoder {
         segments.forEach(System.out::println);
         if (segments.size() == 1)
             return ".";
-        int[] dotAndDashLengths = getDotAndDashLengths();
+        int[] dotAndDashLengths = getDotAndDashLengths(segments);
         System.out.printf("longest dot: %d, longest dash: %d", dotAndDashLengths[0], dotAndDashLengths[1]);
         return segmentsToMorse(dotAndDashLengths, segments);
     }
 
-    private static int[] getDotAndDashLengths() {
+    static int[] getDotAndDashLengths(List<String> segments) {
         int shortestOneSegment = segments.stream()
                 .filter(s -> s.startsWith("1")).mapToInt(String::length).min().orElseThrow();
         int longestOneSegment = segments.stream()
@@ -66,6 +77,9 @@ public class MorseCodeDecoder {
         lengthCounts = segments.stream()
                 .map(String::length)
                 .collect(Collectors.groupingBy(Integer::intValue, Collectors.counting()));
+        lengthWeights = new HashMap<>();
+        lengthCounts.forEach((key, value) ->
+                lengthWeights.put(key, new Weight(value, value * key)));
         System.out.println(lengthCounts);
         System.out.println("longest 1-segment: " + longestOneSegment);
         int shortestSegment = Math.min(shortestOneSegment, shortestZeroSegment);
@@ -74,34 +88,79 @@ public class MorseCodeDecoder {
         if (longestSegment < 2 * shortestSegment)
             // only dots and short pauses
             return new int[]{longestSegment, longestSegment + 1};
-        if (maximumLengthBelow(longestZeroSegment) < 6 * shortestSegment) {
+        if (longestZeroSegment < 6 * shortestSegment) {
             // no word breaks, so treat longest 0-segment like 1-segment
             return new int[]{maximumLengthBelow(1 + (longestSegment) / 3), longestSegment};
         }
         if (longestOneSegment < 2 * shortestSegment) {
             // no dashes, but long pauses
-            return new int[]{maximumLengthBelow(2 + (longestZeroSegment) / 7), longestZeroSegment};
+            return new int[]{maximumLengthBelow(2 + (longestZeroSegment) / 7), maximumLengthBelow(longestZeroSegment)};
         }
 
         maxDuration = Math.max(getMinDurationForDashLength(longestOneSegment),
                 getMinDurationForWordSeparatorLength(longestZeroSegment));
-        int dotMax = (int) Math.ceil(maxDuration);
+        int dotMax = (int) Math.ceil(maxDuration);      //maybe round instead of ceil?
         int dashMax = (int) Math.ceil(3 * maxDuration);
-        return checkLengths(dotMax, dashMax, shortestSegment);
+        return checkLengths(dotMax, dashMax, shortestSegment, longestZeroSegment);
     }
 
-    private static int[] checkLengths(int dotMax, int dashMax, int shortestSegment) {
-        int firstDash = minimumLengthAbove(dotMax);
-        if ((getMinDurationForDashLength(firstDash) <= shortestSegment + 0.5)
-                && (dotMax >= getMaxDurationForDashLength(dashMax))) {
-            // try with firstDash as dotMax, according dashMax is calculated as follows:
-            // maxDuration > dotMax - 0.5 => 3 * maxDuration > 3 * dotMax - 1.5
-            return checkLengths(firstDash, firstDash * 3 - 1, shortestSegment);
+    private static int[] checkLengths(int dotMax, int dashMax, int shortestSegment, int wordSepMax) {
+        int dotCursor = dotMax,
+                dashCursor = dashMax,
+                dotMaxResult = dotMax,
+                dashMaxResult = dashMax;                        ;
+        int firstDash = minimumLengthAbove(dotCursor);
+        int firstWordSep = minimumLengthAbove(dashCursor);
+        double minVariation = wordSepMax;
+        while (dotCursor < dashMax) {
+            /*// firstDash is low enough to be 3 * minimal length of a dot
+                (getMinDurationForDashLength(firstDash) <= shortestSegment + 0.5) {*/
+            System.out.println("Average dot lengths:");
+            double dotAverage = getAverageDotLength(1, dotCursor, 1);
+            double minAverage = dotAverage;
+            double maxAverage = dotAverage;
+            System.out.printf("dots (between %d and %d): %f \n",
+                    1, dotCursor, dotAverage);
+            double dashAverage = getAverageDotLength(firstDash, dashCursor, 3);
+            minAverage = Math.min(minAverage, dashAverage);
+            maxAverage = Math.max(maxAverage, dashAverage);
+            System.out.printf("dashes (between %d and %d): %f \n",
+                    firstDash, dashCursor, dashAverage);
+            double wsAverage = getAverageDotLength(firstWordSep, wordSepMax, 7);
+            minAverage = Math.min(minAverage, wsAverage);
+            maxAverage = Math.max(maxAverage, wsAverage);
+            System.out.printf("word separators (between %d and %d): %f \n",
+                    firstWordSep, wordSepMax, wsAverage);
+            double difference = maxAverage - minAverage;
+            if (difference < minVariation) {
+                minVariation = difference;
+                // better fit, update result
+                dashMaxResult = dashCursor;
+                dotMaxResult = dotCursor;
+            }
+            // move cursor forward
+            dotCursor = firstDash;
+            firstDash = minimumLengthAbove(dotCursor);
+            if (firstWordSep  < 3 * dotCursor + 2) {
+                // dash cursor remains if next words separator would be too long
+                dashCursor = firstWordSep;
+                firstWordSep = minimumLengthAbove(dashCursor);
+            };
         }
-        // else maximal lengths found
-        return new int[]{dotMax, dashMax};
+        return new int[]{dotMaxResult, dashMaxResult};
     }
 
+    private static double getAverageDotLength(int from, int to, int factor) {
+        double countSum = lengthWeights.entrySet().stream()
+                .filter(e -> e.getKey() >= from && e.getKey() <= to)
+                .mapToLong(e -> e.getValue().count)
+                .sum();
+        double countTimesValueSum = lengthWeights.entrySet().stream()
+                .filter(e -> e.getKey() >= from && e.getKey() <= to)
+                .mapToLong(e -> e.getValue().countTimesValue)
+                .sum();
+        return countTimesValueSum / countSum / factor;
+    }
     static String segmentsToMorse(int[] dotAndDashLengths, List<String> segments) {
         StringBuilder sb = new StringBuilder();
         segments.forEach(segment -> sb.append(getMorseDigit(segment, dotAndDashLengths)));
