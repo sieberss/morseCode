@@ -118,23 +118,26 @@ public class MorseCodeDecoder {
             /*// firstDash is low enough to be 3 * minimal length of a dot
                 (getMinDurationForDashLength(firstDash) <= shortestSegment + 0.5) {*/
             System.out.println("Average dot lengths:");
-            double dotAverage = getAverageDotLength(1, dotCursor, 1);
-            double minAverage = dotAverage;
-            double maxAverage = dotAverage;
+            Weight dotAggregate = aggregateWeights(1, dotCursor);
+            double dotAverage = (double) dotAggregate.countTimesValue / dotAggregate.count;
             System.out.printf("dots (between %d and %d): %f \n",
                     1, dotCursor, dotAverage);
-            double dashAverage = getAverageDotLength(firstDash, dashCursor, 3);
-            minAverage = Math.min(minAverage, dashAverage);
-            maxAverage = Math.max(maxAverage, dashAverage);
+            Weight dashAggregate = aggregateWeights(firstDash, dashCursor);
+            double dashAverage = (double) dashAggregate.countTimesValue / dashAggregate.count / 3;
             System.out.printf("dashes (between %d and %d): %f \n",
                     firstDash, dashCursor, dashAverage);
-            double wsAverage = getAverageDotLength(firstWordSep, wordSepMax, 7);
-            minAverage = Math.min(minAverage, wsAverage);
-            maxAverage = Math.max(maxAverage, wsAverage);
+            Weight wsAggregate = aggregateWeights(firstWordSep, wordSepMax);
+            double wsAverage = (double) wsAggregate.countTimesValue / wsAggregate.count / 7;
             System.out.printf("word separators (between %d and %d): %f \n",
                     firstWordSep, wordSepMax, wsAverage);
-            double difference = maxAverage - minAverage;
-            if (difference < minVariation) {
+            double totalAverage = (double) (dotAggregate.countTimesValue + dashAggregate.countTimesValue + wsAggregate.countTimesValue)
+                    / (dotAggregate.count + 3 * dashAggregate.count + 7 * wsAggregate.count);
+            System.out.printf("total (between %d and %d): %f \n",
+                    1, wordSepMax, totalAverage);
+            // minimum difference to total Average
+            double difference =
+                    Math.max(Math.abs(dotAverage - totalAverage), Math.abs(dashAverage - totalAverage));
+            if (difference < minVariation ) {
                 minVariation = difference;
                 // better fit, update result
                 dashMaxResult = dashCursor;
@@ -152,16 +155,16 @@ public class MorseCodeDecoder {
         return new int[]{dotMaxResult, dashMaxResult};
     }
 
-    private static double getAverageDotLength(int from, int to, int factor) {
-        double countSum = lengthWeights.entrySet().stream()
+    private static Weight aggregateWeights(int from, int to) {
+        long countSum = lengthWeights.entrySet().stream()
                 .filter(e -> e.getKey() >= from && e.getKey() <= to)
                 .mapToLong(e -> e.getValue().count)
                 .sum();
-        double countTimesValueSum = lengthWeights.entrySet().stream()
+        long countTimesValueSum = lengthWeights.entrySet().stream()
                 .filter(e -> e.getKey() >= from && e.getKey() <= to)
                 .mapToLong(e -> e.getValue().countTimesValue)
                 .sum();
-        return countTimesValueSum / countSum / factor;
+        return new Weight(countSum, countTimesValueSum);
     }
     static String segmentsToMorse(int[] dotAndDashLengths, List<String> segments) {
         StringBuilder sb = new StringBuilder();
